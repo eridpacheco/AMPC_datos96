@@ -1,6 +1,12 @@
 function [S, stats] = run_adaptivity_figures_datos96(matFile, varargin)
 %RUN_ADAPTIVITY_FIGURES_DATOS96 Generate adaptivity figures for datos_96.
-%
+
+
+%[S, stats] = run_adaptivity_figures_datos96('datos_96_act.mat', ...
+%    'SaveDir', 'figs', ...
+%    'WindowSamples', 96, ...
+%    'DailyAgg', 'median');
+
 % Mathematical definitions (for Methods section):
 % Given the identified parameters at each sample k, define the parameter
 % vector as:

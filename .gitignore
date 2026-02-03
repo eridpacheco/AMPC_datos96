@@ -1,0 +1,8 @@
+# --- Archivos de Matlab y datos temporales ---
+*.asv
+*.autosave
+*.slxc
+
+# --- Archivos de sistema ---
+Thumbs.db
+Desktop.ini

@@ -1,11 +1,11 @@
-function datos96_add_irrigation_shading(figHandle, t, u)
+function datos96_add_irrigation_shading(figHandle, t, u_applied)
 %DATOS96_ADD_IRRIGATION_SHADING Shade irrigation ON periods.
 
-if isempty(u)
+if isempty(u_applied)
     return;
 end
-
-u_on = (u == 1);
+u_on = (u_applied > 0.5);
+u_on(isnan(u_applied)) = false;
 if all(~u_on)
     return;
 end

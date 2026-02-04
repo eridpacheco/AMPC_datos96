@@ -1,12 +1,6 @@
 function [S, stats] = run_adaptivity_figures_datos96(matFile, varargin)
 %RUN_ADAPTIVITY_FIGURES_DATOS96 Generate adaptivity figures for datos_96.
-
-
-%[S, stats] = run_adaptivity_figures_datos96('datos_96_act.mat', ...
-%    'SaveDir', 'figs', ...
-%    'WindowSamples', 96, ...
-%    'DailyAgg', 'median');
-
+%
 % Mathematical definitions (for Methods section):
 % Given the identified parameters at each sample k, define the parameter
 % vector as:
@@ -19,24 +13,25 @@ function [S, stats] = run_adaptivity_figures_datos96(matFile, varargin)
 % Daily aggregation uses calendar-day bins defined by
 %   day(k) = dateshift(t(k), 'start', 'day'),
 % and the daily statistic is the median (or mean if configured).
-% Smoothing uses a centered moving median (default window = 96 samples,
-% corresponding to 1 day at 15-min sampling):
-%   smooth_x(k) = movmedian(x, windowSamples, 'omitnan').
 %
 % Usage:
 %   [S, stats] = run_adaptivity_figures_datos96('datos_96_act.mat', ...
-%       'SaveDir', 'figs', 'WindowSamples', 96, 'DailyAgg', 'median');
+%       'SaveDir', 'figs', 'DailyAgg', 'median', ...
+%       'StartDate', '2024-01-12 00:00:00', ...
+%       'EndDate', '2024-02-06 23:59:59');
 
 p = inputParser;
 p.addRequired('matFile', @(x) ischar(x) || isstring(x));
 p.addParameter('SaveDir', 'figs', @(x) ischar(x) || isstring(x));
-p.addParameter('WindowSamples', 96, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 p.addParameter('DailyAgg', 'median', @(x) ischar(x) || isstring(x));
+p.addParameter('StartDate', [], @(x) isempty(x) || ischar(x) || isstring(x) || isnumeric(x) || isdatetime(x));
+p.addParameter('EndDate', [], @(x) isempty(x) || ischar(x) || isstring(x) || isnumeric(x) || isdatetime(x));
 p.parse(matFile, varargin{:});
 
 saveDir = char(p.Results.SaveDir);
-windowSamples = p.Results.WindowSamples;
 dailyAgg = lower(char(p.Results.DailyAgg));
+startDateInput = p.Results.StartDate;
+endDateInput = p.Results.EndDate;
 
 if ~exist(saveDir, 'dir')
     mkdir(saveDir);
@@ -69,6 +64,29 @@ tbl = tbl(order, :);
 [tu, idxLast] = unique(tsorted, 'last');
 tbl = tbl(idxLast, :);
 t = tu;
+
+% Filter by date range (inclusive)
+startDate = datos96_parse_date_input(startDateInput, t);
+endDate = datos96_parse_date_input(endDateInput, t);
+
+if ~isempty(startDate) || ~isempty(endDate)
+    preCount = height(tbl);
+    if isempty(startDate)
+        startDate = min(t);
+    end
+    if isempty(endDate)
+        endDate = max(t);
+    end
+    mask = (t >= startDate) & (t <= endDate);
+    tbl = tbl(mask, :);
+    t = t(mask);
+    postCount = height(tbl);
+    if postCount == 0
+        error('run_adaptivity_figures_datos96:EmptyDateRange', ...
+            ['El filtro de fechas dejó la tabla vacía. ' ...
+             'Filas antes: %d, filas después: %d.'], preCount, postCount);
+    end
+end
 
 % Extract variables (degrade gracefully if missing)
 A11 = datos96_get_table_var(tbl, 'A11');
@@ -135,40 +153,31 @@ S.dtheta_norm = dtheta_norm;
 % Figure 1: A parameters
 figA = figure('Color', 'w');
 hold on;
-plotA = {};
 if ~all(isnan(A11))
-    plot(t, A11, 'Color', [0.6 0.6 0.9], 'DisplayName', 'A11 (crudo)');
-    plot(t, movmedian(A11, windowSamples, 'omitnan'), 'Color', [0.1 0.1 0.5], ...
-        'LineWidth', 1.6, 'DisplayName', 'A11 (suavizado)');
-    plotA{end+1} = 'A11';
+    plot(t, A11, 'Color', [0.1 0.1 0.5], 'LineWidth', 1.2, ...
+        'DisplayName', 'A_{11}');
 end
 if ~all(isnan(A22))
-    plot(t, A22, 'Color', [0.9 0.6 0.6], 'DisplayName', 'A22 (crudo)');
-    plot(t, movmedian(A22, windowSamples, 'omitnan'), 'Color', [0.5 0.1 0.1], ...
-        'LineWidth', 1.6, 'DisplayName', 'A22 (suavizado)');
-    plotA{end+1} = 'A22';
+    plot(t, A22, 'Color', [0.5 0.1 0.1], 'LineWidth', 1.2, ...
+        'DisplayName', 'A_{22}');
 end
 if ~all(isnan(A12))
-    plot(t, A12, 'Color', [0.7 0.8 0.7], 'DisplayName', 'A12 (crudo)');
-    plot(t, movmedian(A12, windowSamples, 'omitnan'), 'Color', [0.2 0.5 0.2], ...
-        'LineWidth', 1.4, 'DisplayName', 'A12 (suavizado)');
-    plotA{end+1} = 'A12';
+    plot(t, A12, 'Color', [0.2 0.5 0.2], 'LineWidth', 1.1, ...
+        'DisplayName', 'A_{12}');
 end
 if ~all(isnan(A21))
-    plot(t, A21, 'Color', [0.8 0.7 0.9], 'DisplayName', 'A21 (crudo)');
-    plot(t, movmedian(A21, windowSamples, 'omitnan'), 'Color', [0.4 0.2 0.6], ...
-        'LineWidth', 1.4, 'DisplayName', 'A21 (suavizado)');
-    plotA{end+1} = 'A21';
+    plot(t, A21, 'Color', [0.4 0.2 0.6], 'LineWidth', 1.1, ...
+        'DisplayName', 'A_{21}');
 end
 hold off;
 
-xlabel('Tiempo');
-ylabel('Parámetros A');
-title('Evolución temporal de parámetros A (RLS)');
+xlabel('Time');
+ylabel('A-matrix parameters');
+title('Temporal evolution of A-matrix parameters (RLS)');
 legend('Location', 'best');
 grid on;
 
-if isempty(plotA)
+if all(isnan(A11)) && all(isnan(A22)) && all(isnan(A12)) && all(isnan(A21))
     warning('No hay parámetros A disponibles para graficar.');
 end
 
@@ -179,24 +188,19 @@ datos96_export_figure(figA, figAPathPng, figAPathPdf);
 % Figure 2: B parameters
 figB = figure('Color', 'w');
 hold on;
-plotB = {};
 if ~all(isnan(B1))
-    plot(t, B1, 'Color', [0.5 0.7 0.9], 'DisplayName', 'B1 (crudo)');
-    plot(t, movmedian(B1, windowSamples, 'omitnan'), 'Color', [0 0.3 0.6], ...
-        'LineWidth', 1.6, 'DisplayName', 'B1 (suavizado)');
-    plotB{end+1} = 'B1';
+    plot(t, B1, 'Color', [0 0.3 0.6], 'LineWidth', 1.2, ...
+        'DisplayName', 'B_{1}');
 end
 if ~all(isnan(B2))
-    plot(t, B2, 'Color', [0.9 0.7 0.5], 'DisplayName', 'B2 (crudo)');
-    plot(t, movmedian(B2, windowSamples, 'omitnan'), 'Color', [0.6 0.3 0], ...
-        'LineWidth', 1.6, 'DisplayName', 'B2 (suavizado)');
-    plotB{end+1} = 'B2';
+    plot(t, B2, 'Color', [0.6 0.3 0], 'LineWidth', 1.2, ...
+        'DisplayName', 'B_{2}');
 end
 hold off;
 
-xlabel('Tiempo');
-ylabel('Parámetros B');
-title('Evolución temporal de parámetros B (RLS)');
+xlabel('Time');
+ylabel('B-matrix parameters');
+title('Temporal evolution of B-matrix parameters (RLS)');
 grid on;
 
 if ~isempty(u)
@@ -205,7 +209,7 @@ end
 
 legend('Location', 'best');
 
-if isempty(plotB)
+if all(isnan(B1)) && all(isnan(B2))
     warning('No hay parámetros B disponibles para graficar.');
 end
 
@@ -223,10 +227,10 @@ try
     switch dailyAgg
         case 'mean'
             ttDay = retime(tt, 'daily', 'mean');
-            aggName = 'Media diaria';
+            aggName = 'Daily mean';
         otherwise
             ttDay = retime(tt, 'daily', 'median');
-            aggName = 'Mediana diaria';
+            aggName = 'Daily median';
     end
     plot(ttDay.t, ttDay.dtheta_norm, '-o', 'Color', [0.8 0.2 0.2], ...
         'LineWidth', 1.2, 'MarkerSize', 4, 'DisplayName', aggName);
@@ -235,9 +239,9 @@ catch
 end
 hold off;
 
-xlabel('Tiempo');
+xlabel('Time');
 ylabel('||\Delta\theta||_2');
-title('Evolución de la magnitud de adaptación');
+title('Temporal evolution of adaptation magnitude');
 legend('Location', 'best');
 grid on;
 
@@ -246,3 +250,8 @@ figDPathPdf = fullfile(saveDir, 'fig03_dtheta_norm.pdf');
 datos96_export_figure(figD, figDPathPng, figDPathPdf);
 
 end
+% [S, stats] = run_adaptivity_figures_datos96('datos_96_act.mat', ...
+%     'SaveDir', 'figs', ...
+%     'DailyAgg', 'median', ...
+%     'StartDate', '2024-01-12 00:00:00', ...
+%     'EndDate', '2024-02-05 23:59:59');

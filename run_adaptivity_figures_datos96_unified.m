@@ -1,5 +1,5 @@
-function [S, stats] = run_adaptivity_figures_datos96(matFile, varargin)
-%RUN_ADAPTIVITY_FIGURES_DATOS96 Generate adaptivity figures for datos_96.
+function [S, stats] = run_adaptivity_figures_datos96_unified(matFile, varargin)
+%RUN_ADAPTIVITY_FIGURES_DATOS96_UNIFIED Generate adaptivity figures for datos_96.
 %
 % Mathematical definitions (for Methods section):
 % Given the identified parameters at each sample k, define the parameter
@@ -24,12 +24,16 @@ p = inputParser;
 p.addRequired('matFile', @(x) ischar(x) || isstring(x));
 p.addParameter('SaveDir', 'figs', @(x) ischar(x) || isstring(x));
 p.addParameter('DailyAgg', 'median', @(x) ischar(x) || isstring(x));
+p.addParameter('ShadeIrrigation', true, @(x) islogical(x) || isnumeric(x));
+p.addParameter('UseSemilogDtheta', true, @(x) islogical(x) || isnumeric(x));
 p.addParameter('StartDate', [], @(x) isempty(x) || ischar(x) || isstring(x) || isnumeric(x) || isdatetime(x));
 p.addParameter('EndDate', [], @(x) isempty(x) || ischar(x) || isstring(x) || isnumeric(x) || isdatetime(x));
 p.parse(matFile, varargin{:});
 
 saveDir = char(p.Results.SaveDir);
 dailyAgg = lower(char(p.Results.DailyAgg));
+shadeIrrigation = logical(p.Results.ShadeIrrigation);
+useSemilogDtheta = logical(p.Results.UseSemilogDtheta);
 startDateInput = p.Results.StartDate;
 endDateInput = p.Results.EndDate;
 
@@ -39,18 +43,18 @@ end
 
 raw = load(matFile);
 if ~isfield(raw, 'datos_96')
-    error('run_adaptivity_figures_datos96:MissingTable', ...
+    error('run_adaptivity_figures_datos96_unified:MissingTable', ...
         'El archivo %s no contiene la tabla datos_96.', matFile);
 end
 
 if ~istable(raw.datos_96)
-    error('run_adaptivity_figures_datos96:InvalidTable', ...
+    error('run_adaptivity_figures_datos96_unified:InvalidTable', ...
         'datos_96 no es una tabla válida.');
 end
 
 tbl = raw.datos_96;
 if ~ismember('timestamp', tbl.Properties.VariableNames)
-    error('run_adaptivity_figures_datos96:MissingTimestamp', ...
+    error('run_adaptivity_figures_datos96_unified:MissingTimestamp', ...
         'La tabla datos_96 no contiene la columna timestamp.');
 end
 
@@ -88,7 +92,7 @@ if ~isempty(startDate) || ~isempty(endDate)
     t = t(mask);
     postCount = height(tbl);
     if postCount == 0
-        error('run_adaptivity_figures_datos96:EmptyDateRange', ...
+        error('run_adaptivity_figures_datos96_unified:EmptyDateRange', ...
             ['El filtro de fechas dejó la tabla vacía. ' ...
              'Filas antes: %d, filas después: %d.'], preCount, postCount);
     end
@@ -103,7 +107,7 @@ B1 = datos96_get_table_var(tbl, 'B1');
 B2 = datos96_get_table_var(tbl, 'B2');
 
 if ~ismember('uk_1', tbl.Properties.VariableNames)
-    error('run_adaptivity_figures_datos96:MissingUk1', ...
+    error('run_adaptivity_figures_datos96_unified:MissingUk1', ...
         'La tabla datos_96 no contiene la columna obligatoria uk_1.');
 end
 u_applied = datos96_get_table_var(tbl, 'uk_1');
@@ -144,6 +148,16 @@ stats.percent_irrigation_on = mean(u_on) * 100;
 % "irrigation_events" cuenta flancos ascendentes (0 -> 1) en u_on.
 stats.irrigation_events = sum(diff(u_on) == 1);
 
+% Helper for semilog plotting of ||Delta theta|| (avoid zeros/negatives)
+validPos = validDtheta(validDtheta > 0);
+if isempty(validPos)
+    dthetaFloor = 1e-10;
+else
+    dthetaFloor = max(1e-10, min(validPos) / 10);
+end
+dtheta_plot = dtheta_norm;
+dtheta_plot(~isnan(dtheta_plot) & dtheta_plot <= 0) = dthetaFloor;
+
 % Prepare output struct
 S = struct();
 S.t = t;
@@ -183,7 +197,7 @@ hold off;
 xlabel('Time');
 ylabel('A-matrix parameters');
 title('Temporal evolution of A-matrix parameters (RLS)');
-legend('Location', 'best');
+legend('Location', 'eastoutside');
 grid on;
 
 if all(isnan(A11)) && all(isnan(A22)) && all(isnan(A12)) && all(isnan(A21))
@@ -212,11 +226,11 @@ ylabel('B-matrix parameters');
 title('Temporal evolution of B-matrix parameters (RLS)');
 grid on;
 
-if ~isempty(u_applied)
+if shadeIrrigation && ~isempty(u_applied)
     datos96_add_irrigation_shading(figB, t, u_applied);
 end
 
-legend('Location', 'best');
+legend('Location', 'eastoutside');
 
 if all(isnan(B1)) && all(isnan(B2))
     warning('No hay parámetros B disponibles para graficar.');
@@ -228,7 +242,12 @@ datos96_export_figure(figB, figBPathPng, figBPathPdf);
 
 % Figure 3: ||Delta theta||_2
 figD = figure('Color', 'w');
-plot(t, dtheta_norm, 'Color', [0.2 0.2 0.7], 'DisplayName', '||\Delta\theta||_2');
+if useSemilogDtheta
+    plot(t, dtheta_plot, 'Color', [0.2 0.2 0.7], 'DisplayName', '||\Delta\theta||_2');
+    set(gca, 'YScale', 'log');
+else
+    plot(t, dtheta_norm, 'Color', [0.2 0.2 0.7], 'DisplayName', '||\Delta\theta||_2');
+end
 
 hold on;
 try
@@ -241,7 +260,11 @@ try
             ttDay = retime(tt, 'daily', 'median');
             aggName = 'Daily median';
     end
-    plot(ttDay.t, ttDay.dtheta_norm, '-o', 'Color', [0.8 0.2 0.2], ...
+    yAgg = ttDay.dtheta_norm;
+    if useSemilogDtheta
+        yAgg(~isnan(yAgg) & yAgg <= 0) = dthetaFloor;
+    end
+    plot(ttDay.t, yAgg, '-o', 'Color', [0.8 0.2 0.2], ...
         'LineWidth', 1.2, 'MarkerSize', 4, 'DisplayName', aggName);
 catch
     warning('No se pudo calcular la agregación diaria de ||Delta theta||.');
@@ -249,18 +272,121 @@ end
 hold off;
 
 xlabel('Time');
-ylabel('||\Delta\theta||_2');
+if useSemilogDtheta
+    ylabel('||\Delta\theta||_2 (log scale)');
+else
+    ylabel('||\Delta\theta||_2');
+end
 title('Temporal evolution of adaptation magnitude');
-legend('Location', 'best');
+legend('Location', 'northwest');
 grid on;
+
+if shadeIrrigation && ~isempty(u_applied)
+    datos96_add_irrigation_shading(figD, t, u_applied);
+end
 
 figDPathPng = fullfile(saveDir, 'fig03_dtheta_norm.png');
 figDPathPdf = fullfile(saveDir, 'fig03_dtheta_norm.pdf');
 datos96_export_figure(figD, figDPathPng, figDPathPdf);
 
+
+% Figure 4: Unified adaptivity overview (A, B, and ||Delta theta||_2)
+figU = figure('Color', 'w');
+tl = tiledlayout(figU, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+title(tl, 'Field demonstration of adaptivity (RLS): A(k), B(k), and ||\Delta\theta(k)||_2', 'FontSize', 16);
+
+% --- Panel (a): A-matrix parameters ---
+ax1 = nexttile(tl, 1);
+hold(ax1, 'on');
+if ~all(isnan(A11)), plot(ax1, t, A11, 'Color', [0.1 0.1 0.5], 'LineWidth', 1.2, 'DisplayName', 'A_{11}'); end
+if ~all(isnan(A22)), plot(ax1, t, A22, 'Color', [0.5 0.1 0.1], 'LineWidth', 1.2, 'DisplayName', 'A_{22}'); end
+if ~all(isnan(A12)), plot(ax1, t, A12, 'Color', [0.2 0.5 0.2], 'LineWidth', 1.1, 'DisplayName', 'A_{12}'); end
+if ~all(isnan(A21)), plot(ax1, t, A21, 'Color', [0.4 0.2 0.6], 'LineWidth', 1.1, 'DisplayName', 'A_{21}'); end
+hold(ax1, 'off');
+ylabel(ax1, 'A-matrix entries');
+grid(ax1, 'on');
+legend(ax1, 'Location', 'eastoutside');
+ax1.XTickLabel = []; % keep x-axis labels only on the bottom panel
+
+if shadeIrrigation && ~isempty(u_applied)
+    axes(ax1); %#ok<LAXES>
+    datos96_add_irrigation_shading(figU, t, u_applied);
 end
-% [S, stats] = run_adaptivity_figures_datos96('datos_96_act.mat', ...
-%     'SaveDir', 'figs', ...
-%     'DailyAgg', 'median', ...
-%     'StartDate', '2024-01-12 00:00:00', ...
-%     'EndDate', '2024-02-05 23:59:59');
+
+% --- Panel (b): B-matrix parameters (with irrigation shading) ---
+ax2 = nexttile(tl, 2);
+hold(ax2, 'on');
+if ~all(isnan(B1)), plot(ax2, t, B1, 'Color', [0 0.3 0.6], 'LineWidth', 1.2, 'DisplayName', 'B_{1}'); end
+if ~all(isnan(B2)), plot(ax2, t, B2, 'Color', [0.6 0.3 0], 'LineWidth', 1.2, 'DisplayName', 'B_{2}'); end
+hold(ax2, 'off');
+ylabel(ax2, 'B-matrix entries');
+grid(ax2, 'on');
+if shadeIrrigation && ~isempty(u_applied)
+    % Shade irrigation ON periods based on logged applied valve state uk_1
+    axes(ax2); %#ok<LAXES>
+    datos96_add_irrigation_shading(figU, t, u_applied);
+end
+legend(ax2, 'Location', 'eastoutside');
+ax2.XTickLabel = [];
+
+% --- Panel (c): ||Delta theta||_2 (with daily aggregation and irrigation shading) ---
+ax3 = nexttile(tl, 3);
+if useSemilogDtheta
+    plot(ax3, t, dtheta_plot, 'Color', [0.2 0.2 0.7], 'DisplayName', '||\Delta\theta||_2');
+    set(ax3, 'YScale', 'log');
+else
+    plot(ax3, t, dtheta_norm, 'Color', [0.2 0.2 0.7], 'DisplayName', '||\Delta\theta||_2');
+end
+hold(ax3, 'on');
+try
+    tt = timetable(t, dtheta_norm);
+    switch dailyAgg
+        case 'mean'
+            ttDay = retime(tt, 'daily', 'mean');
+            aggName = 'Daily mean';
+        otherwise
+            ttDay = retime(tt, 'daily', 'median');
+            aggName = 'Daily median';
+    end
+    yAgg = ttDay.dtheta_norm;
+    if useSemilogDtheta
+        yAgg(~isnan(yAgg) & yAgg <= 0) = dthetaFloor;
+    end
+    plot(ax3, ttDay.t, yAgg, '-o', 'Color', [0.8 0.2 0.2], ...
+        'LineWidth', 1.2, 'MarkerSize', 4, 'DisplayName', aggName);
+catch
+    warning('No se pudo calcular la agregación diaria de ||Delta theta||.');
+end
+hold(ax3, 'off');
+xlabel(ax3, 'Time');
+if useSemilogDtheta
+    ylabel(ax3, '||\Delta\theta||_2 (log scale)');
+else
+    ylabel(ax3, '||\Delta\theta||_2');
+end
+grid(ax3, 'on');
+if shadeIrrigation && ~isempty(u_applied)
+    axes(ax3); %#ok<LAXES>
+    datos96_add_irrigation_shading(figU, t, u_applied);
+end
+legend(ax3, 'Location', 'northwest');
+
+% Link x-axes across panels
+linkaxes([ax1, ax2, ax3], 'x');
+
+% Export unified figure
+figUPathPng = fullfile(saveDir, 'fig04_adaptivity_unified.png');
+figUPathPdf = fullfile(saveDir, 'fig04_adaptivity_unified.pdf');
+datos96_export_figure(figU, figUPathPng, figUPathPdf);
+
+end
+% [S, stats] = run_adaptivity_figures_datos96_unified('datos_96_act.mat', ...
+%     'SaveDir','figs', ...
+%     'DailyAgg','median', ...
+%     'StartDate','2024-01-12 00:00:00', ...
+%     'EndDate',  '2024-02-05 23:59:59');
+
+% [S, stats] = run_adaptivity_figures_datos96_unified('datos_96_act.mat', ...
+%     'SaveDir','figs', ...
+%     'ShadeIrrigation', false);
+
